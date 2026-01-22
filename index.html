@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -9,11 +10,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
-        // 1. 强制注销 Service Worker 缓存
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
         }
-        // 2. 强制清理本地存储的旧版本数据
         if (localStorage.getItem('STABLE_V') !== '3.0') {
             localStorage.clear();
             localStorage.setItem('STABLE_V', '3.0');
