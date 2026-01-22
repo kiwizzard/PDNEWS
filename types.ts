@@ -1,5 +1,4 @@
-
-export type Category = 'AI' | '互联网' | '保险' | '商业';
+export type Category = 'AI' | '互联网' | '保险' | '商业' | '社科';
 
 export interface Article {
   id: string;

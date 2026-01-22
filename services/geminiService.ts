@@ -1,45 +1,44 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { Article, Category } from "../types";
 
 export const fetchLatestIntel = async (category: Category): Promise<Article[]> => {
-  // 按照指令：在每次请求前创建新实例
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const categoryFocus: Record<Category, string> = {
-    'AI': '聚焦全球及中国最新的 AI 科技动态、大模型应用、AI Agent 实践及 AI 算力趋势。',
-    '互联网': '聚焦腾讯、阿里、字节跳动、美团等互联网大厂的核心动作、组织架构调整及新业务尝试。',
-    '保险': '聚焦保险行业数字化转型、车险科技、新能源车险政策、非车险创新及行业深度研报。',
-    '商业': '聚焦极具深度和趣味性的商业案例分析、消费趋势洞察及全球宏观商业评论。'
+    'AI': '聚焦全球大模型落地、AI Agent、AI 算力以及生成式 AI 在金融保险业的具体应用。',
+    '互联网': '聚焦中国大厂动态、平台经济治理、出海趋势以及新一代交互产品。',
+    '保险': '聚焦新能源车险（尤其是特斯拉/比亚迪等主机厂进场）、UBI保险、理赔数字化、保险营销科技创新。',
+    '商业': '聚焦宏观商业评论、零售演进、供应链变革以及极具参考价值的跨行业增长案例。',
+    '社科': '聚焦行为心理学、社会学调查、组织行为演进以及其对用户行为和产品决策的潜在影响。'
   };
 
   const prompt = `
-    你是一名深耕互联网与保险行业、具备极强商业敏感度的顶尖分析师。
-    请针对 "${category}" 领域，检索过去7天内最具深度、最值得产品经理研读的 10 篇精选报道或深度长文。
+    你是一名服务于“互联网&车险行业”的高级产品专家。请针对 "${category}" 领域，检索过去7天内最具深度、最硬核的 8 篇长文报道。
     ${categoryFocus[category]}
     
-    输出格式极其严格：
-    使用标记 [ITEM_START] 开始每一篇文章，[ITEM_END] 结束。
+    输出要求：
+    1. 标题必须有冲击力且专业。
+    2. URL必须是真实的直达链接（如财新、36氪、晚点LatePost等）。
+    3. PM_INSIGHT 部分必须从产品策略、业务重构、风控创新角度出发。
     
-    内部结构：
-    [TITLE]: 文章标题
-    [SOURCE]: 媒体/公众号名称
-    [URL]: 文章的原始直达链接
-    [SUMMARY]: 结构化摘要（背景 + 3个关键点）
-    [PM_INSIGHT]: 
-    1. 业务重构启示：分析其对价值链的影响。
-    2. 产品与体验创新：具体的功能或场景灵感。
-    3. 演进预判：未来 12 个月的关键趋势。
-    [DETAIL]: 深度内容还原（约 500 字）。
+    输出格式标记：
+    [ITEM_START]
+    [TITLE]: 标题
+    [SOURCE]: 媒体名
+    [URL]: 链接
+    [SUMMARY]: 核心内容（背景+3要点）
+    [PM_INSIGHT]: 针对产品经理的3条决策参考（必看）
+    [DETAIL]: 深度逻辑复盘（约 500 字）
+    [ITEM_END]
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', // 升级为 Pro 以获得更深度的 PM 洞察
+      model: 'gemini-3-pro-preview',
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        temperature: 0.2, // 进一步降低随机性，确保链接准确
+        temperature: 0.1,
       },
     });
 
@@ -49,18 +48,17 @@ export const fetchLatestIntel = async (category: Category): Promise<Article[]> =
     return items.map((item, index) => {
       const cleanItem = item.split('[ITEM_END]')[0];
       
-      const title = cleanItem.match(/\[TITLE\]: (.*)/)?.[1]?.trim() || "行业深度洞察";
-      const source = cleanItem.match(/\[SOURCE\]: (.*)/)?.[1]?.trim() || "分析师频道";
+      const title = cleanItem.match(/\[TITLE\]: (.*)/)?.[1]?.trim() || "深度研究报告";
+      const source = cleanItem.match(/\[SOURCE\]: (.*)/)?.[1]?.trim() || "PM Intelligence";
       const urlMatch = cleanItem.match(/\[URL\]: (https?:\/\/[^\s]+)/);
-      const summary = cleanItem.match(/\[SUMMARY\]: ([\s\S]*?)(?=\[PM_INSIGHT\]|$)/)?.[1]?.trim() || "内容摘要生成中...";
-      const pmInsight = cleanItem.match(/\[PM_INSIGHT\]: ([\s\S]*?)(?=\[DETAIL\]|$)/)?.[1]?.trim() || "战略洞察生成中...";
-      const reconstructedContent = cleanItem.match(/\[DETAIL\]: ([\s\S]*)/)?.[1]?.trim() || "深度全文还原中...";
+      const summary = cleanItem.match(/\[SUMMARY\]: ([\s\S]*?)(?=\[PM_INSIGHT\]|$)/)?.[1]?.trim() || "内容正在研读中...";
+      const pmInsight = cleanItem.match(/\[PM_INSIGHT\]: ([\s\S]*?)(?=\[DETAIL\]|$)/)?.[1]?.trim() || "洞察提取中...";
+      const reconstructedContent = cleanItem.match(/\[DETAIL\]: ([\s\S]*)/)?.[1]?.trim() || "详细分析生成中...";
       
       let url = urlMatch ? urlMatch[1] : "";
       if (!url) {
         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-        const foundUrls = chunks.map((c: any) => c.web?.uri).filter(Boolean);
-        url = foundUrls[index] || (foundUrls.length > 0 ? foundUrls[index % foundUrls.length] : "https://www.google.com/search?q=" + encodeURIComponent(title));
+        url = chunks[index]?.web?.uri || "https://www.google.com/search?q=" + encodeURIComponent(title);
       }
 
       return {
@@ -71,13 +69,13 @@ export const fetchLatestIntel = async (category: Category): Promise<Article[]> =
         summary,
         pmInsight,
         reconstructedContent,
-        date: new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }),
+        date: new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
         category,
-        readTime: `${Math.floor(Math.random() * 3) + 5} 分钟`
+        readTime: '6 分钟'
       };
     });
   } catch (error) {
-    console.error("Error fetching intel:", error);
-    throw error; // 抛出错误供 App.tsx 处理（如重置激活状态）
+    console.error("Fetch Intel Failed:", error);
+    throw error;
   }
 };
