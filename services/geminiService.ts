@@ -2,8 +2,14 @@ import { GoogleGenAI } from "@google/genai";
 import { Article, Category } from "../types";
 
 export const fetchLatestIntel = async (category: Category): Promise<Article[]> => {
-  // 每次调用时重新创建实例，确保获取最新的 process.env.API_KEY
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // 获取注入的 API_KEY
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey || apiKey === 'undefined' || apiKey === 'null') {
+    throw new Error("ENV_KEY_MISSING: Vercel 环境变量未读取到，请检查配置并 Redeploy");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const categoryFocus: Record<Category, string> = {
     'AI': '聚焦全球大模型落地、AI Agent、AI 算力以及生成式 AI 在金融保险业的具体应用。',
@@ -14,60 +20,46 @@ export const fetchLatestIntel = async (category: Category): Promise<Article[]> =
   };
 
   const prompt = `
-    你是一名服务于“互联网&车险行业”的高级产品专家。请针对 "${category}" 领域，检索过去7天内最具深度、最硬核的 8 篇长文报道。
+    你是一名服务于“互联网&车险行业”的高级产品专家。请针对 "${category}" 领域，检索过去7天内最具深度的 8 篇硬核报道。
     ${categoryFocus[category]}
     
     输出要求：
-    请直接输出 8 个情报项，每个项必须严格包含以下标记：
     [ITEM_START]
     [TITLE]: 标题
     [SOURCE]: 媒体名
     [URL]: 链接
     [SUMMARY]: 核心内容（背景+3个关键要点）
-    [PM_INSIGHT]: 针对产品经理的3条决策参考（必看）
-    [DETAIL]: 深度逻辑复盘（约 500 字，包含业务逻辑、风控或产品细节）
+    [PM_INSIGHT]: 针对产品经理的3条决策参考
+    [DETAIL]: 深度逻辑复盘（约 500 字）
     [ITEM_END]
 
-    注意：请不要输出任何开场白或结束语，直接开始输出 [ITEM_START]。
+    请直接开始输出，不要废话。
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // 使用 Flash 版本以获得极速响应
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        temperature: 0.2,
+        temperature: 0.1,
       },
     });
 
     const text = response.text || "";
-    if (!text.includes('[ITEM_START]')) {
-      console.warn("Gemini 返回内容格式不标准，尝试二次处理...");
-    }
-
-    const items = text.split('[ITEM_START]').filter(i => i.includes('[ITEM_END]') || i.includes('[TITLE]'));
+    const items = text.split('[ITEM_START]').filter(i => i.trim().length > 30);
     
     if (items.length === 0) {
-      throw new Error("未能解析到任何情报内容");
+      throw new Error("FORMAT_ERROR: 模型返回的内容无法被正确解析。");
     }
 
     return items.map((item, index) => {
-      const cleanItem = item.split('[ITEM_END]')[0];
-      
-      const title = cleanItem.match(/\[TITLE\]: (.*)/)?.[1]?.trim() || "深度研究报告";
-      const source = cleanItem.match(/\[SOURCE\]: (.*)/)?.[1]?.trim() || "行业情报";
-      const urlMatch = cleanItem.match(/\[URL\]: (https?:\/\/[^\s]+)/);
-      const summary = cleanItem.match(/\[SUMMARY\]: ([\s\S]*?)(?=\[PM_INSIGHT\]|$)/)?.[1]?.trim() || "内容解析中...";
-      const pmInsight = cleanItem.match(/\[PM_INSIGHT\]: ([\s\S]*?)(?=\[DETAIL\]|$)/)?.[1]?.trim() || "洞察提取中...";
-      const reconstructedContent = cleanItem.match(/\[DETAIL\]: ([\s\S]*)/)?.[1]?.trim() || "详细分析生成中...";
-      
-      // 提取 Grounding 元数据作为备选 URL
-      let url = urlMatch ? urlMatch[1] : "";
-      if (!url || url.length < 10) {
-        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-        url = chunks[index]?.web?.uri || `https://www.google.com/search?q=${encodeURIComponent(title)}`;
-      }
+      const title = item.match(/\[TITLE\]: (.*)/)?.[1]?.trim() || "深度研究报告";
+      const source = item.match(/\[SOURCE\]: (.*)/)?.[1]?.trim() || "行业情报";
+      const url = item.match(/\[URL\]: (https?:\/\/[^\s]+)/)?.[1]?.trim() || `https://www.google.com/search?q=${encodeURIComponent(title)}`;
+      const summary = item.match(/\[SUMMARY\]: ([\s\S]*?)(?=\[PM_INSIGHT\]|$)/)?.[1]?.trim() || "内容解析中...";
+      const pmInsight = item.match(/\[PM_INSIGHT\]: ([\s\S]*?)(?=\[DETAIL\]|$)/)?.[1]?.trim() || "洞察提取中...";
+      const reconstructedContent = item.match(/\[DETAIL\]: ([\s\S]*?)(?=\[ITEM_END\]|$)/)?.[1]?.trim() || "详细分析生成中...";
 
       return {
         id: `${category}-${index}-${Date.now()}`,
@@ -82,17 +74,22 @@ export const fetchLatestIntel = async (category: Category): Promise<Article[]> =
         readTime: '6 分钟'
       };
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Fetch Intel Failed:", error);
-    // 如果失败，返回一个友好的错误占位
+    // 将具体错误抛出，让 App 能捕获并显示
+    let errorMessage = error.message || "未知错误";
+    if (errorMessage.includes("403")) errorMessage = "API Key 无效或权限受限 (403)";
+    if (errorMessage.includes("404")) errorMessage = "模型名称错误或 API 暂不可用 (404)";
+    if (errorMessage.includes("500")) errorMessage = "Google 服务端繁忙，请稍后再试 (500)";
+
     return [{
       id: 'error',
-      title: '情报获取暂时中断',
-      source: '系统提示',
+      title: '情报舱连接失败',
+      source: '系统',
       url: '#',
-      summary: '由于网络波动或 API 限制，暂时无法获取最新情报。请检查 API_KEY 是否配置正确，或稍后再试。',
-      pmInsight: '建议：1. 检查 Vercel 环境变量；2. 确认区域是否支持 Gemini。',
-      reconstructedContent: '错误详情: ' + (error instanceof Error ? error.message : String(error)),
+      summary: `错误原因：${errorMessage}`,
+      pmInsight: '排查建议：1. 确认 Vercel 环境变量 API_KEY 结尾没有空格；2. 确认已手动执行 Redeploy；3. 检查 API Key 是否启用了 Gemini API 服务。',
+      reconstructedContent: '错误详情: ' + (error instanceof Error ? error.stack : 'No Stack'),
       date: 'ERR',
       category: category,
       readTime: '0'
